@@ -17,6 +17,7 @@ const APP_ASSET_NAME = "Quest-Chat-Panel-Control-win32-x64.zip";
 const APK_ASSET_NAME = "Quest-Chat-Panel.apk";
 const ANDROID_PACKAGE_ID = "com.codex.questchatpanel";
 const APK_PATH = resolveApkPath();
+const DEVICE_STALE_MS = 10000;
 
 let mainWindow;
 let relayProcess;
@@ -27,6 +28,8 @@ let controlState = readControlState();
 let lastSeenApkFingerprint = "";
 let questApkVersion = "";
 let questApkVersionChecked = false;
+let lastDevices = [];
+let lastDeviceSeenAt = 0;
 let updateInfo = {
   checking: false,
   currentAppVersion: app.getVersion(),
@@ -128,10 +131,18 @@ function setState(patch) {
     apk,
     apkNeedsInstall: Boolean(apk.fingerprint && apk.fingerprint !== controlState.lastInstalledApkFingerprint),
     updateInfo,
+    devices: visibleDevices(),
     logPath: LOG_PATH,
     apkPath: APK_PATH,
     ...patch
   });
+}
+
+function visibleDevices() {
+  if (lastDevices.length || Date.now() - lastDeviceSeenAt < DEVICE_STALE_MS) {
+    return lastDevices;
+  }
+  return [];
 }
 
 function readControlState() {
@@ -530,8 +541,16 @@ async function listDevices() {
     log(`ADB device check failed: ${result.stderr || result.stdout}`, "adb");
   }
 
-  setState({ devices });
-  return { adb, devices };
+  if (devices.length) {
+    lastDevices = devices;
+    lastDeviceSeenAt = Date.now();
+  } else if (Date.now() - lastDeviceSeenAt >= DEVICE_STALE_MS) {
+    lastDevices = [];
+  }
+
+  const visible = visibleDevices();
+  setState({ devices: visible });
+  return { adb, devices: visible };
 }
 
 async function readQuestApkVersion(adb, deviceId) {
