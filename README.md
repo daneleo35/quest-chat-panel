@@ -49,6 +49,15 @@ Use the **Chat Sources** section in the control app to set Twitch, YouTube, and 
 
 The control app checks GitHub Releases for updates. The update cards show the current and latest versions for both the Windows control app and the Quest APK. Use **Update App** to download, extract, and launch the newest Windows app, or **Update APK** to download and install the newest Quest APK to an authorized headset.
 
+## Bump Versions
+
+```powershell
+cd quest-chat-panel
+npm run bump-version -- 1.0.2
+```
+
+This updates the Windows app version, `package-lock.json`, and the Quest APK `versionCode` / `versionName` together.
+
 ## Build The Windows EXE
 
 ```powershell
@@ -75,7 +84,7 @@ npm run package:installer
 The installer is written to:
 
 ```text
-installer\Quest-Chat-Panel-Control-Setup-1.0.0.exe
+installer\Quest-Chat-Panel-Control-Setup-<version>.exe
 ```
 
 The installer includes the Quest APK as a bundled resource for auto-install.
