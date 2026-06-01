@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quest Chat Panel Control</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Quest Chat Panel</h1>
+        <p>Relay, installer, and logs for the headset chat panel.</p>
+      </div>
+      <div class="header-actions">
+        <button id="openFolder">Open Folder</button>
+        <button id="openLogs">Open Logs</button>
+      </div>
+    </header>
+
+    <section class="status-grid">
+      <article>
+        <span class="label">Relay</span>
+        <strong id="relayStatus">Starting</strong>
+        <div class="button-row">
+          <button id="startRelay">Start</button>
+          <button id="stopRelay">Stop</button>
+        </div>
+      </article>
+
+      <article>
+        <span class="label">Quest</span>
+        <strong id="deviceStatus">Checking ADB</strong>
+        <div class="button-row">
+          <button id="install">Install APK</button>
+          <button id="refresh">Refresh</button>
+        </div>
+      </article>
+
+      <article>
+        <span class="label">Auto Installer</span>
+        <label class="toggle">
+          <input id="autoInstall" type="checkbox" checked>
+          <span>Install when authorized Quest appears or APK changes</span>
+        </label>
+      </article>
+
+      <article>
+        <span class="label">App Update</span>
+        <strong id="appUpdateStatus">Checking</strong>
+        <div class="version-line" id="appVersionLine">Current: - / Latest: -</div>
+        <div class="button-row">
+          <button id="updateApp">Update App</button>
+          <button id="checkUpdates">Check</button>
+        </div>
+      </article>
+
+      <article>
+        <span class="label">APK Update</span>
+        <strong id="apkStatus">Checking</strong>
+        <div class="version-line" id="apkVersionLine">Current: - / Latest: -</div>
+        <div class="button-row">
+          <button id="updateApk">Update APK</button>
+          <button id="buildApk">Build APK</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="update-panel">
+      <div><span>Release</span><code id="releaseLine">Not checked yet</code></div>
+    </section>
+
+    <section class="paths">
+      <div><span>APK</span><code id="apkPath"></code></div>
+      <div><span>Log</span><code id="logPath"></code></div>
+    </section>
+
+    <section class="settings-panel">
+      <div class="settings-title">Chat Sources</div>
+      <div class="settings-grid">
+        <label>
+          <span>Twitch channels</span>
+          <textarea id="twitchChannels" spellcheck="false" placeholder="channel-name"></textarea>
+        </label>
+        <label>
+          <span>YouTube sources</span>
+          <textarea id="youtubeSources" spellcheck="false" placeholder="@channel, channel ID, live URL, or live video ID"></textarea>
+        </label>
+        <label>
+          <span>Kick channels</span>
+          <textarea id="kickChannels" spellcheck="false" placeholder="channel-name"></textarea>
+        </label>
+      </div>
+      <div class="settings-actions">
+        <button id="saveSources">Save Sources</button>
+      </div>
+    </section>
+
+    <section class="log-panel">
+      <div class="log-title">Live Log</div>
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

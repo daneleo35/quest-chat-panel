@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quest Chat Panel</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="topbar">
+      <div>
+        <h1>Stream Chat</h1>
+        <p id="status">Enter the relay URL printed by your PC</p>
+      </div>
+      <div class="actions">
+        <button id="compactToggle" type="button">Compact</button>
+        <button id="clearButton" type="button">Clear</button>
+      </div>
+    </header>
+
+    <section id="sources" class="sources" aria-label="Source status"></section>
+    <section id="messages" class="messages" aria-live="polite"></section>
+
+    <form id="settingsForm" class="settings">
+      <label for="socketUrl">Relay</label>
+      <input id="socketUrl" name="socketUrl" type="password" inputmode="url" placeholder="relay address hidden">
+      <button id="connectButton" type="submit">Connect</button>
+      <button id="mockButton" type="button">Mock</button>
+    </form>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build APK and Windows app
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: pwsh
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build Quest APK
+        run: .\gradlew.bat assembleDebug
+
+      - name: Rename Quest APK
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "release" | Out-Null
+          Copy-Item `
+            -LiteralPath "app\build\outputs\apk\debug\app-debug.apk" `
+            -Destination "release\Quest-Chat-Panel.apk" `
+            -Force
+
+      - name: Package Windows control app
+        run: npm run package:control
+
+      - name: Build Windows installer
+        run: npm run package:installer
+
+      - name: Zip Windows control app
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path "release\Quest Chat Panel Control-win32-x64\*" `
+            -DestinationPath "release\Quest-Chat-Panel-Control-win32-x64.zip" `
+            -Force
+
+      - name: Upload Quest APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-chat-panel-apk
+          path: release/Quest-Chat-Panel.apk
+          if-no-files-found: error
+
+      - name: Upload Windows control app
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-chat-panel-control-win32-x64
+          path: release/Quest-Chat-Panel-Control-win32-x64.zip
+          if-no-files-found: error
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-chat-panel-control-installer
+          path: installer/Quest-Chat-Panel-Control-Setup-*.exe
+          if-no-files-found: error

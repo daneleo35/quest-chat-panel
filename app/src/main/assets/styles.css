@@ -1,0 +1,269 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, Roboto, Arial, sans-serif;
+  background: #07090d;
+  color: #f5f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #07090d;
+}
+
+.panel {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(28, 36, 44, 0.7), rgba(7, 9, 13, 0.98)),
+    #07090d;
+}
+
+.topbar,
+.settings,
+.sources {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.topbar {
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 780;
+  letter-spacing: 0;
+}
+
+p {
+  margin: 4px 0 0;
+  color: #aab4c3;
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button,
+input {
+  height: 42px;
+  border-radius: 8px;
+  font: inherit;
+}
+
+button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1d2733;
+  color: #f5f7fb;
+  padding: 0 14px;
+  font-weight: 700;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.sources {
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  scrollbar-width: none;
+}
+
+.source {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 4px 9px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #cbd5e4;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.source::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8f9bad;
+}
+
+.source.connected::before {
+  background: #5fd0a5;
+}
+
+.source.error::before {
+  background: #ff7777;
+}
+
+.source.connecting::before {
+  background: #f7c873;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  scrollbar-width: thin;
+}
+
+.message {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  align-items: start;
+  max-width: 100%;
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #071014;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.platform {
+  flex: none;
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: #071014;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.platform.twitch {
+  background: #a970ff;
+}
+
+.platform.youtube {
+  background: #ff6969;
+}
+
+.platform.kick {
+  background: #53fc18;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.time {
+  flex: none;
+  color: #8f9bad;
+  font-size: 12px;
+}
+
+.text {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: #dfe6f2;
+  font-size: 18px;
+  line-height: 1.34;
+}
+
+.settings {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(7, 9, 13, 0.9);
+}
+
+label {
+  color: #aab4c3;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+input {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #101720;
+  color: #f5f7fb;
+  padding: 0 12px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #5fd0a5;
+  box-shadow: 0 0 0 2px rgba(95, 208, 165, 0.18);
+}
+
+.compact .topbar {
+  padding: 9px 12px;
+}
+
+.compact .settings,
+.compact .sources {
+  display: none;
+}
+
+.compact .messages {
+  gap: 6px;
+  padding: 9px 10px 11px;
+}
+
+.compact .message {
+  grid-template-columns: 1fr;
+  padding: 8px 10px;
+}
+
+.compact .avatar,
+.compact .time {
+  display: none;
+}
+
+.compact .text {
+  font-size: 16px;
+}
+
+@media (max-width: 620px) {
+  .settings {
+    grid-template-columns: 1fr auto auto;
+  }
+
+  label {
+    display: none;
+  }
+}

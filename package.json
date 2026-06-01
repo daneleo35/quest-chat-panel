@@ -1,0 +1,65 @@
+{
+  "name": "quest-chat-panel-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PC relay for a sideloaded Meta Quest chat panel.",
+  "main": "scripts/control-main.js",
+  "scripts": {
+    "app": "electron scripts/control-main.js",
+    "relay": "node scripts/relay-server.js",
+    "build:apk": "gradle assembleDebug",
+    "package:control": "electron-packager . \"Quest Chat Panel Control\" --platform=win32 --arch=x64 --out=release --overwrite --no-asar --ignore=\"^/dist($|/)\" --ignore=\"^/release($|/)\" --ignore=\"^/installer($|/)\" --ignore=\"^/logs($|/)\" --ignore=\"^/updates($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/\\.gradle($|/)\" --ignore=\"^/build($|/)\"",
+    "package:installer": "electron-builder --win nsis --x64 --publish never"
+  },
+  "build": {
+    "appId": "com.codex.questchatpanel.control",
+    "productName": "Quest Chat Panel Control",
+    "asar": false,
+    "directories": {
+      "output": "installer"
+    },
+    "files": [
+      "package.json",
+      "scripts/**/*",
+      "relay.config.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "app/build/outputs/apk/debug/app-debug.apk",
+        "to": "Quest-Chat-Panel.apk"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Quest-Chat-Panel-Control-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Quest Chat Panel Control"
+    }
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "tmi.js": "^1.8.5",
+    "ws": "^8.17.1",
+    "youtube-chat": "^2.2.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^19.0.0",
+    "electron-builder": "^26.0.12",
+    "electron": "^42.2.0"
+  }
+}

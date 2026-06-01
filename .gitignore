@@ -1,0 +1,15 @@
+.gradle/
+build/
+dist/
+installer/
+release/
+logs/
+node_modules/
+updates/
+local.properties
+.control-state.json
+
+app/build/
+
+*.log
+*.tmp
