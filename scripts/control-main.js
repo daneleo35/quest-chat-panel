@@ -1,7 +1,9 @@
-const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, shell } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
+const http = require("http");
 const https = require("https");
+const net = require("net");
 const os = require("os");
 const path = require("path");
 
@@ -18,18 +20,46 @@ const APK_ASSET_NAME = "Quest-Chat-Panel.apk";
 const ANDROID_PACKAGE_ID = "com.codex.questchatpanel";
 const APK_PATH = resolveApkPath();
 const DEVICE_STALE_MS = 10000;
+const QUEST_NETWORK_STALE_MS = 15000;
 
 let mainWindow;
+let tray;
 let relayProcess;
 let adbPollTimer;
+let obsPollTimer;
 let autoInstall = true;
 let installedThisSession = false;
+let isQuitting = false;
+let externalRelayRunning = false;
 let controlState = readControlState();
 let lastSeenApkFingerprint = "";
 let questApkVersion = "";
 let questApkVersionChecked = false;
 let lastDevices = [];
 let lastDeviceSeenAt = 0;
+let obsState = {
+  enabled: false,
+  connected: false,
+  currentScene: "",
+  scenes: [],
+  audioInputs: [],
+  streaming: false,
+  recording: false,
+  streamStartedAt: ""
+};
+let questState = {
+  connected: false,
+  id: "",
+  batteryLevel: "",
+  batteryStatus: ""
+};
+let questNetworkState = {
+  connected: false,
+  id: "",
+  batteryLevel: "",
+  batteryStatus: "",
+  lastSeenAt: 0
+};
 let updateInfo = {
   checking: false,
   currentAppVersion: app.getVersion(),
@@ -71,9 +101,55 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "control-renderer", "index.html"));
+  mainWindow.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+    log("Window hidden to tray.");
+  });
   mainWindow.on("closed", () => {
     mainWindow = undefined;
   });
+}
+
+function createTrayIcon() {
+  if (tray) return tray;
+
+  const icon = nativeImage.createFromDataURL([
+    "data:image/png;base64,",
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAM1BMVEUHDBMNEigWJ0AWIzUULkAcQmM7WW4RGTArRlorNlQ0SV4QExgPEiUQFi0XKEFDcYiQFcwLAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAZ0lEQVR4nGNgYGBkYmZhZWNgYmVjZGJm4eTk5GJjZmRk5eDg4sFiYmJmZWFh4eLj4GBhY2VgYGLg4ubiYuPn4ODk4ubh5uHl4+fg5AczgJmBkQFEi4sLQAAOQwcS97TsYgAAAABJRU5ErkJggg=="
+  ].join(""));
+  icon.setTemplateImage(false);
+
+  tray = new Tray(icon);
+  tray.setToolTip("Quest Chat Panel Control");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Open Quest Chat Panel Control", click: () => showMainWindow() },
+    { label: "Open Folder", click: () => shell.openPath(ROOT) },
+    { label: "Open Logs", click: () => shell.showItemInFolder(LOG_PATH) },
+    { type: "separator" },
+    { label: "Quit", click: () => quitApp() }
+  ]));
+  tray.on("click", () => showMainWindow());
+  tray.on("double-click", () => showMainWindow());
+  return tray;
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function quitApp() {
+  isQuitting = true;
+  app.quit();
 }
 
 function createAppMenu() {
@@ -125,12 +201,14 @@ function maskPrivateRelayUrls(value) {
 function setState(patch) {
   const apk = apkInfo();
   emit("state", {
-    relayRunning: Boolean(relayProcess && !relayProcess.killed),
+    relayRunning: relayAvailable(),
+    relayManagedExternally: externalRelayRunning,
     autoInstall,
     installedThisSession,
     apk,
     apkNeedsInstall: Boolean(apk.fingerprint && apk.fingerprint !== controlState.lastInstalledApkFingerprint),
     updateInfo,
+    obs: hudSnapshot(),
     devices: visibleDevices(),
     logPath: LOG_PATH,
     apkPath: APK_PATH,
@@ -143,6 +221,18 @@ function visibleDevices() {
     return lastDevices;
   }
   return [];
+}
+
+function activeQuestState() {
+  if (questNetworkState.connected && Date.now() - questNetworkState.lastSeenAt < QUEST_NETWORK_STALE_MS) {
+    return {
+      connected: true,
+      id: questNetworkState.id,
+      batteryLevel: questNetworkState.batteryLevel,
+      batteryStatus: questNetworkState.batteryStatus
+    };
+  }
+  return questState;
 }
 
 function readControlState() {
@@ -224,13 +314,113 @@ function checkApkForUpdates() {
   return apk;
 }
 
-function startRelay() {
+function relayAvailable() {
+  return Boolean((relayProcess && !relayProcess.killed) || externalRelayRunning);
+}
+
+function relayProbeOptions() {
+  const config = readRelayConfig();
+  return {
+    hostname: "127.0.0.1",
+    port: config.port,
+    path: "/",
+    method: "GET",
+    timeout: 1200
+  };
+}
+
+function probeRelay() {
+  return new Promise((resolve) => {
+    const request = http.request(relayProbeOptions(), (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        const reachable = response.statusCode === 200 && /Quest Chat Panel relay/i.test(body);
+        resolve(reachable);
+      });
+    });
+    request.on("error", () => resolve(false));
+    request.on("timeout", () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.end();
+  });
+}
+
+async function killOtherRelays() {
+  const config = readRelayConfig();
+  const relayScriptName = "relay-server.js";
+  const port = Number(config.port || 8787);
+  const discoveryPort = 8788;
+  const script = `
+$targets = @{}
+$commandMatches = Get-CimInstance Win32_Process |
+  Where-Object {
+    $_.CommandLine -and
+    $_.ProcessId -ne ${process.pid} -and
+    $_.CommandLine -match [regex]::Escape("${relayScriptName}")
+  }
+foreach ($proc in $commandMatches) { $targets[$proc.ProcessId] = $true }
+foreach ($listenPort in @(${port}, ${discoveryPort})) {
+  try {
+    Get-NetTCPConnection -LocalPort $listenPort -State Listen -ErrorAction Stop |
+      ForEach-Object { if ($_.OwningProcess -ne ${process.pid}) { $targets[$_.OwningProcess] = $true } }
+  } catch {}
+  try {
+    Get-NetUDPEndpoint -LocalPort $listenPort -ErrorAction Stop |
+      ForEach-Object { if ($_.OwningProcess -ne ${process.pid}) { $targets[$_.OwningProcess] = $true } }
+  } catch {}
+}
+$killed = @()
+foreach ($pidValue in $targets.Keys) {
+  try {
+    Stop-Process -Id ([int]$pidValue) -Force -ErrorAction Stop
+    $killed += [int]$pidValue
+  } catch {}
+}
+$killed | ConvertTo-Json -Compress
+`;
+  const result = await run("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  if (result.code !== 0) {
+    log(`Could not terminate existing relay instances: ${result.stderr || result.stdout}`, "relay");
+    return [];
+  }
+  const output = String(result.stdout || "").trim();
+  if (!output) return [];
+  try {
+    const parsed = JSON.parse(output);
+    return Array.isArray(parsed) ? parsed : [parsed].filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function startRelay(attempt = 0) {
   if (relayProcess && !relayProcess.killed) {
     log("Relay already running.");
     setState();
     return;
   }
 
+  if (await probeRelay()) {
+    const killed = await killOtherRelays();
+    if (killed.length) {
+      log(`Stopped existing relay instance${killed.length === 1 ? "" : "s"} (${killed.join(", ")}).`, "relay");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (await probeRelay()) {
+      externalRelayRunning = true;
+      log("Another relay is still holding the ports after termination attempt.", "relay");
+      setState();
+      return;
+    }
+  }
+
+  externalRelayRunning = false;
   log("Starting relay...");
   relayProcess = spawn(process.execPath, [path.join(ROOT, "scripts", "relay-server.js")], {
     cwd: ROOT,
@@ -246,16 +436,47 @@ function startRelay() {
     for (const line of data.toString().split(/\r?\n/).filter(Boolean)) log(line, "relay");
   });
   relayProcess.on("exit", (code) => {
+    if (code === 1) {
+      relayProcess = undefined;
+      killOtherRelays().then(async (killed) => {
+        if (killed.length && attempt < 1) {
+          log(`Relay ports were busy. Stopped conflicting process${killed.length === 1 ? "" : "es"} (${killed.join(", ")}), retrying...`, "relay");
+          await startRelay(attempt + 1);
+          return;
+        }
+        const reachable = await probeRelay();
+        externalRelayRunning = reachable;
+        log(reachable ? "Another relay is still holding the ports after termination attempt." : `Relay exited with code ${code}.`, "relay");
+        publishHud();
+        setState();
+      });
+      return;
+    }
     log(`Relay exited with code ${code}.`, "relay");
     relayProcess = undefined;
+    externalRelayRunning = false;
+    publishHud();
     setState();
   });
 
+  publishHud();
   setState();
 }
 
-function stopRelay() {
+async function stopRelay() {
   if (!relayProcess || relayProcess.killed) {
+    if (externalRelayRunning) {
+      const killed = await killOtherRelays();
+      if (killed.length) {
+        log(`Stopped existing relay instance${killed.length === 1 ? "" : "s"} (${killed.join(", ")}).`, "relay");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const stillRunning = await probeRelay();
+      externalRelayRunning = stillRunning;
+      log(stillRunning ? "Relay is still running after the termination attempt." : "Relay stopped.", "relay");
+      setState();
+      return;
+    }
     log("Relay is not running.");
     setState();
     return;
@@ -264,6 +485,8 @@ function stopRelay() {
   log("Stopping relay...");
   relayProcess.kill();
   relayProcess = undefined;
+  externalRelayRunning = false;
+  publishHud();
   setState();
 }
 
@@ -298,11 +521,15 @@ function readRelayConfig() {
 }
 
 function normalizeRelayConfig(value) {
+  const obsConfig = value.obs || {};
   return {
     port: Number(value.port || 8787),
     twitchChannels: normalizeList(value.twitchChannels),
     youtubeSources: normalizeList(value.youtubeSources),
-    kickChannels: normalizeList(value.kickChannels)
+    kickChannels: normalizeList(value.kickChannels),
+    obs: {
+      enabled: Boolean(obsConfig.enabled)
+    }
   };
 }
 
@@ -317,14 +544,15 @@ function normalizeList(value) {
     .filter(Boolean);
 }
 
-function saveRelayConfig(value) {
+async function saveRelayConfig(value) {
   const next = normalizeRelayConfig(value);
   fs.writeFileSync(RELAY_CONFIG_PATH, `${JSON.stringify(next, null, 2)}${os.EOL}`);
   log("Saved relay source settings.");
-  if (relayProcess && !relayProcess.killed) {
-    stopRelay();
-    startRelay();
+  if (relayAvailable()) {
+    await stopRelay();
+    await startRelay();
   }
+  configureObs(next.obs).catch((error) => log(`Streamlabs setup failed: ${cleanError(error)}`, "obs"));
   setState({ relayConfig: next });
   return next;
 }
@@ -515,6 +743,226 @@ async function updateAppFromRelease() {
   return true;
 }
 
+function slobsCall(resource, method, args = []) {
+  const request = JSON.stringify({
+    jsonrpc: "2.0",
+    id: Date.now(),
+    method,
+    params: { resource, args }
+  }) + "\n";
+
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection("\\\\.\\pipe\\slobs");
+    let buffer = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Timed out connecting to Streamlabs Desktop API"));
+    }, 2500);
+
+    socket.on("connect", () => {
+      socket.write(request);
+    });
+    socket.on("data", (data) => {
+      buffer += data.toString("utf8");
+      const line = buffer.split("\n").find((item) => item.trim());
+      if (!line) return;
+      clearTimeout(timer);
+      socket.end();
+      try {
+        const response = JSON.parse(line);
+        if (response.error) {
+          reject(new Error(response.error.message || JSON.stringify(response.error)));
+          return;
+        }
+        resolve(response.result);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on("close", () => clearTimeout(timer));
+  });
+}
+
+async function configureObs(config = readRelayConfig().obs) {
+  clearInterval(obsPollTimer);
+  if (!config.enabled) {
+    obsState = { ...obsState, enabled: false, connected: false, scenes: [], audioInputs: [] };
+    await publishHud();
+    setState();
+    return;
+  }
+
+  obsState = { ...obsState, enabled: true };
+  await pollObs();
+  obsPollTimer = setInterval(() => pollObs().catch((error) => log(`Streamlabs poll failed: ${cleanError(error)}`, "obs")), POLL_MS);
+}
+
+async function pollObs(force = false) {
+  const config = readRelayConfig().obs;
+  if (!config.enabled && !force) return;
+
+  try {
+    const [activeScene, obsLists] = await Promise.all([
+      slobsCall("ScenesService", "activeScene"),
+      discoverObsLists()
+    ]);
+    obsState = {
+      ...obsState,
+      connected: true,
+      currentScene: activeScene?.name || "",
+      scenes: obsLists.scenes,
+      audioInputs: obsLists.audioInputs,
+      activeProcess: "",
+      activeWindow: ""
+    };
+  } catch (error) {
+    obsState.connected = false;
+    log(`Streamlabs connection failed: ${cleanError(error)}`, "obs");
+  }
+
+  await publishHud();
+  setState();
+}
+
+async function discoverObsLists() {
+  const [scenes, audioSources] = await Promise.all([
+    slobsCall("ScenesService", "getScenes"),
+    slobsCall("AudioService", "getSourcesForCurrentScene")
+  ]);
+  return {
+    scenes: (scenes || []).map((scene) => ({ id: scene.id, name: scene.name })).filter((scene) => scene.id && scene.name),
+    audioInputs: (audioSources || []).map((source) => ({
+      id: source.id || source.sourceId || source.resourceId,
+      resourceId: source.resourceId,
+      name: source.name || source.sourceId || "Audio Source",
+      kind: source.type || "",
+      muted: Boolean(source.muted),
+      volumeDb: typeof source.fader?.deflection === "number" ? Math.round(source.fader.deflection * 100) : 0,
+      volumeMul: typeof source.fader?.deflection === "number" ? source.fader.deflection : 0
+    })).filter((source) => source.resourceId)
+  };
+}
+
+async function ensureObsReady() {
+  await slobsCall("ScenesService", "activeScene");
+  obsState.connected = true;
+  return true;
+}
+
+async function refreshObsNow() {
+  await pollObs(true);
+  return hudSnapshot();
+}
+
+async function setObsScene(sceneName) {
+  if (!await ensureObsReady()) return false;
+  const scene = obsState.scenes.find((item) => item.name === sceneName) ||
+    (await slobsCall("ScenesService", "getScenes")).find((item) => item.name === sceneName);
+  if (!scene?.id) {
+    log(`Streamlabs scene not found: ${sceneName}.`, "obs");
+    return false;
+  }
+  await slobsCall("ScenesService", "makeSceneActive", [scene.id]);
+  obsState.currentScene = scene.name;
+  log(`Switched Streamlabs to ${scene.name}.`, "obs");
+  await publishHud();
+  setState();
+  pollObs(true).catch((error) => log(`Streamlabs refresh failed: ${cleanError(error)}`, "obs"));
+  return true;
+}
+
+async function setObsInputMute(inputName, muted) {
+  if (!await ensureObsReady()) return false;
+  const source = obsState.audioInputs.find((item) => item.name === inputName || item.id === inputName || item.resourceId === inputName);
+  if (!source?.resourceId) {
+    log(`Streamlabs audio source not found: ${inputName}.`, "obs");
+    return false;
+  }
+  await slobsCall(source.resourceId, "setMuted", [Boolean(muted)]);
+  source.muted = Boolean(muted);
+  log(`${muted ? "Muted" : "Unmuted"} Streamlabs input ${source.name}.`, "obs");
+  await publishHud();
+  setState();
+  pollObs(true).catch((error) => log(`Streamlabs refresh failed: ${cleanError(error)}`, "obs"));
+  return true;
+}
+
+async function setObsInputVolume(inputName, volumeDb) {
+  if (!await ensureObsReady()) return false;
+  const source = obsState.audioInputs.find((item) => item.name === inputName || item.id === inputName || item.resourceId === inputName);
+  if (!source?.resourceId) {
+    log(`Streamlabs audio source not found: ${inputName}.`, "obs");
+    return false;
+  }
+  const value = Math.max(0, Math.min(1, Number(volumeDb) / 100));
+  await slobsCall(source.resourceId, "setDeflection", [value]);
+  source.volumeDb = Math.round(value * 100);
+  source.volumeMul = value;
+  log(`Set Streamlabs input ${source.name} to ${Math.round(value * 100)}%.`, "obs");
+  await publishHud();
+  setState();
+  pollObs(true).catch((error) => log(`Streamlabs refresh failed: ${cleanError(error)}`, "obs"));
+  return true;
+}
+
+function hudSnapshot() {
+  const activeQuest = activeQuestState();
+  return {
+    obsConnected: obsState.connected,
+    obsEnabled: obsState.enabled,
+    currentScene: obsState.currentScene,
+    scenes: obsState.scenes,
+    audioInputs: obsState.audioInputs,
+    streaming: obsState.streaming,
+    recording: obsState.recording,
+    streamUptime: streamUptime(),
+    activeProcess: "",
+    activeWindow: "",
+    questConnected: activeQuest.connected,
+    questDevice: activeQuest.id,
+    questBattery: activeQuest.batteryLevel,
+    questBatteryStatus: activeQuest.batteryStatus,
+    relayRunning: relayAvailable()
+  };
+}
+
+function streamUptime() {
+  const match = String(obsState.streamStartedAt || "").match(/^(\d+):(\d+):(\d+)/);
+  if (obsState.streaming && match) return `${match[1]}:${match[2]}:${match[3]}`;
+  return "00:00:00";
+}
+
+function publishHud() {
+  const config = readRelayConfig();
+  const body = JSON.stringify(hudSnapshot());
+  return new Promise((resolve) => {
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port: config.port,
+      path: "/hud",
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body)
+      },
+      timeout: 1200
+    }, (response) => {
+      response.resume();
+      response.on("end", resolve);
+    });
+    request.on("error", resolve);
+    request.on("timeout", () => {
+      request.destroy();
+      resolve();
+    });
+    request.end(body);
+  });
+}
+
 async function adbPath() {
   const fromPath = await run("where", ["adb"], { shell: true });
   const first = fromPath.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
@@ -581,6 +1029,94 @@ async function readQuestApkVersion(adb, deviceId) {
   return version;
 }
 
+async function readQuestBattery(adb, deviceId) {
+  const result = await run(adb, ["-s", deviceId, "shell", "dumpsys", "battery"]);
+  if (result.code !== 0) return;
+  const level = result.stdout.match(/level:\s*(\d+)/i)?.[1] || "";
+  const statusCode = result.stdout.match(/status:\s*(\d+)/i)?.[1] || "";
+  const status = {
+    "2": "charging",
+    "3": "discharging",
+    "4": "not charging",
+    "5": "full"
+  }[statusCode] || "";
+  questState = {
+    ...questState,
+    batteryLevel: level ? `${level}%` : "",
+    batteryStatus: status
+  };
+}
+
+async function readQuestNetworkStatus() {
+  const config = readRelayConfig();
+  return new Promise((resolve) => {
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port: config.port,
+      path: "/quest-status",
+      method: "GET",
+      timeout: 1200
+    }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        try {
+          const data = JSON.parse(body || "{}");
+          const timestamp = Number(data.timestamp || 0);
+          if (data.questConnected && timestamp && Date.now() - timestamp < QUEST_NETWORK_STALE_MS) {
+            questNetworkState = {
+              connected: true,
+              id: String(data.questDevice || ""),
+              batteryLevel: String(data.questBattery || ""),
+              batteryStatus: String(data.questBatteryStatus || ""),
+              lastSeenAt: timestamp
+            };
+          } else if (Date.now() - questNetworkState.lastSeenAt >= QUEST_NETWORK_STALE_MS) {
+            questNetworkState = {
+              connected: false,
+              id: "",
+              batteryLevel: "",
+              batteryStatus: "",
+              lastSeenAt: 0
+            };
+          }
+        } catch {
+          if (Date.now() - questNetworkState.lastSeenAt >= QUEST_NETWORK_STALE_MS) {
+            questNetworkState = {
+              connected: false,
+              id: "",
+              batteryLevel: "",
+              batteryStatus: "",
+              lastSeenAt: 0
+            };
+          }
+        }
+        resolve();
+      });
+    });
+    request.on("error", () => {
+      if (Date.now() - questNetworkState.lastSeenAt >= QUEST_NETWORK_STALE_MS) {
+        questNetworkState = {
+          connected: false,
+          id: "",
+          batteryLevel: "",
+          batteryStatus: "",
+          lastSeenAt: 0
+        };
+      }
+      resolve();
+    });
+    request.on("timeout", () => {
+      request.destroy();
+      resolve();
+    });
+    request.end();
+  });
+}
+
 async function installApk(reason = "manual", apkPath = APK_PATH) {
   const { adb, devices } = await listDevices();
   const ready = devices.find((device) => device.state === "device");
@@ -622,6 +1158,7 @@ async function installApk(reason = "manual", apkPath = APK_PATH) {
 async function pollAdb() {
   const apk = checkApkForUpdates();
   const { adb, devices } = await listDevices();
+  await readQuestNetworkStatus();
   const readyDevice = devices.find((device) => device.state === "device");
   const ready = Boolean(readyDevice);
   const unauthorized = devices.some((device) => device.state === "unauthorized");
@@ -631,7 +1168,14 @@ async function pollAdb() {
   }
 
   if (readyDevice) {
+    questState = { ...questState, connected: true, id: readyDevice.id };
     await readQuestApkVersion(adb, readyDevice.id);
+    await readQuestBattery(adb, readyDevice.id);
+    await publishHud();
+    setState();
+  } else {
+    questState = { connected: false, id: "", batteryLevel: "", batteryStatus: "" };
+    await publishHud();
     setState();
   }
 
@@ -649,6 +1193,10 @@ ipcMain.handle("apk:build", () => buildApk());
 ipcMain.handle("update:check", () => checkForReleaseUpdates());
 ipcMain.handle("update:app", () => updateAppFromRelease());
 ipcMain.handle("update:apk", () => updateApkFromRelease());
+ipcMain.handle("obs:refresh", () => refreshObsNow());
+ipcMain.handle("obs:set-scene", (_event, sceneName) => setObsScene(String(sceneName || "")));
+ipcMain.handle("obs:set-input-mute", (_event, inputName, muted) => setObsInputMute(String(inputName || ""), muted));
+ipcMain.handle("obs:set-input-volume", (_event, inputName, volumeDb) => setObsInputVolume(String(inputName || ""), volumeDb));
 ipcMain.handle("config:get", () => readRelayConfig());
 ipcMain.handle("config:save", (_event, value) => saveRelayConfig(value));
 ipcMain.handle("auto-install:set", (_event, value) => {
@@ -665,6 +1213,7 @@ ipcMain.handle("state:get", () => {
 app.whenReady().then(() => {
   fs.mkdirSync(LOG_DIR, { recursive: true });
   createAppMenu();
+  createTrayIcon();
   createWindow();
   log("Control app started.");
   log(`Log file: ${LOG_PATH}`);
@@ -672,15 +1221,24 @@ app.whenReady().then(() => {
   checkApkForUpdates();
   checkForReleaseUpdates();
   startRelay();
+  configureObs(readRelayConfig().obs).catch((error) => log(`Streamlabs setup failed: ${cleanError(error)}`, "obs"));
   pollAdb();
   adbPollTimer = setInterval(() => pollAdb().catch((error) => log(error.message, "adb")), POLL_MS);
 });
 
 app.on("before-quit", () => {
+  isQuitting = true;
   clearInterval(adbPollTimer);
+  clearInterval(obsPollTimer);
   if (relayProcess && !relayProcess.killed) relayProcess.kill();
 });
 
 app.on("window-all-closed", () => {
-  app.quit();
+  if (process.platform !== "darwin") {
+    return;
+  }
+});
+
+app.on("activate", () => {
+  showMainWindow();
 });

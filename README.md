@@ -1,6 +1,18 @@
 # Quest Chat Panel
 
-A sideloadable Meta Quest 3 flat-panel app for Kick, Twitch, and YouTube chat. The headset app is intentionally simple: it connects to a PC relay over WebSocket, and the PC relay handles the streaming-platform connections.
+A sideloadable Meta Quest 3 flat-panel app for Kick, Twitch, and YouTube chat, with an optional Windows companion for relay management, Streamlabs control, updates, and installs.
+
+## What Is New In v2
+
+- Quest app modes:
+  - `Companion App + OBS`
+  - `Stream Chat Only`
+- Manual Twitch, YouTube, and Kick source settings in both the headset and the Windows companion.
+- Real emote rendering for Twitch, YouTube, and Kick instead of plain-text fallbacks.
+- Streamlabs scene switching and audio mute/volume control from both the companion app and the headset overlay.
+- Automatic relay discovery on the local network.
+- Headset battery and device status reported over Wi-Fi to the companion app, with ADB still available as a fallback.
+- Windows companion close-to-tray behavior and relay takeover if older relay instances are already running.
 
 ## Build The APK
 
@@ -49,11 +61,25 @@ Use the **Chat Sources** section in the control app to set Twitch, YouTube, and 
 
 The control app checks GitHub Releases for updates. The update cards show the current and latest versions for both the Windows control app and the Quest APK. Use **Update App** to download, extract, and launch the newest Windows app, or **Update APK** to download and install the newest Quest APK to an authorized headset.
 
+## Companion vs Headset-Only
+
+`Companion App + OBS`
+
+- Uses the Windows relay.
+- Enables Streamlabs scene and audio control.
+- Reports Quest battery/device status over the local network.
+
+`Stream Chat Only`
+
+- Connects to Twitch, YouTube, and Kick directly from the headset.
+- Hides relay and Streamlabs controls.
+- Useful when you do not want to run the Windows companion.
+
 ## Bump Versions
 
 ```powershell
 cd quest-chat-panel
-npm run bump-version -- 1.0.2
+npm run bump-version -- 2.0.0
 ```
 
 This updates the Windows app version, `package-lock.json`, and the Quest APK `versionCode` / `versionName` together.
@@ -137,3 +163,4 @@ Supported source forms:
 - Twitch reads public chat through anonymous IRC via `tmi.js`.
 - YouTube uses `youtube-chat`, which reads public live chat without a Google API key.
 - Kick uses Kick's public channel metadata plus the chat Pusher websocket. Kick's public interface can change, so this connector is isolated in `scripts/relay-server.js`.
+- The Windows companion uses the local Streamlabs named pipe, so no remote token setup is needed for the manual control flow.

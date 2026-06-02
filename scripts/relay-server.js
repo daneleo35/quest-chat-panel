@@ -3,6 +3,7 @@ const dgram = require("dgram");
 const http = require("http");
 const os = require("os");
 const path = require("path");
+const net = require("net");
 const axios = require("axios");
 const tmi = require("tmi.js");
 const WebSocket = require("ws");
@@ -19,6 +20,13 @@ const DISCOVERY_REQUEST = "QUEST_CHAT_DISCOVER";
 const config = normalizeConfig(readConfig());
 const clients = new Set();
 const connectors = [];
+let questStatus = {
+  questConnected: false,
+  questDevice: "",
+  questBattery: "",
+  questBatteryStatus: "",
+  timestamp: 0
+};
 
 function readConfig() {
   try {
@@ -57,6 +65,33 @@ function broadcast(payload) {
   }
 }
 
+function writeJson(res, statusCode, payload) {
+  res.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type"
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
 function status(source, state, detail) {
   const event = { type: "status", source, state, detail };
   console.log(`[${source}] ${state}${detail ? ` - ${detail}` : ""}`);
@@ -64,24 +99,231 @@ function status(source, state, detail) {
 }
 
 function message(payload) {
+  const parts = Array.isArray(payload.parts) ? payload.parts : undefined;
   broadcast({
     type: "message",
     id: `${payload.platform}:${payload.channel}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+    timestamp: new Date().toISOString(),
+    text: payload.text || flattenMessageParts(parts),
+    parts,
+    ...payload
+  });
+}
+
+function hud(payload) {
+  broadcast({
+    type: "hud",
     timestamp: new Date().toISOString(),
     ...payload
   });
 }
 
+function flattenMessageParts(parts) {
+  return (parts || [])
+    .map((part) => part.type === "emote" ? (part.alt || "") : (part.text || ""))
+    .join("")
+    .trim();
+}
+
+function pushTextPart(parts, text) {
+  if (!text) return;
+  const previous = parts[parts.length - 1];
+  if (previous && previous.type === "text") {
+    previous.text += text;
+    return;
+  }
+  parts.push({ type: "text", text });
+}
+
+function buildTwitchParts(text, emotes) {
+  const value = String(text || "");
+  if (!emotes || typeof emotes !== "object") {
+    return [{ type: "text", text: value }];
+  }
+
+  const ranges = [];
+  for (const [emoteId, matches] of Object.entries(emotes)) {
+    for (const range of matches || []) {
+      if (!Array.isArray(range) || range.length < 2) continue;
+      ranges.push({
+        id: emoteId,
+        start: Number(range[0]),
+        end: Number(range[1])
+      });
+    }
+  }
+  ranges.sort((left, right) => left.start - right.start);
+
+  if (!ranges.length) {
+    return [{ type: "text", text: value }];
+  }
+
+  const parts = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start > cursor) {
+      pushTextPart(parts, value.slice(cursor, range.start));
+    }
+    const alt = value.slice(range.start, range.end + 1);
+    parts.push({
+      type: "emote",
+      alt,
+      url: `https://static-cdn.jtvnw.net/emoticons/v2/${range.id}/default/dark/2.0`
+    });
+    cursor = range.end + 1;
+  }
+  if (cursor < value.length) {
+    pushTextPart(parts, value.slice(cursor));
+  }
+  return parts.length ? parts : [{ type: "text", text: value }];
+}
+
+function buildYouTubeParts(messageItems) {
+  const parts = [];
+  for (const item of messageItems || []) {
+    if (item?.text) {
+      pushTextPart(parts, item.text);
+      continue;
+    }
+    if (item?.url || item?.emojiText || item?.alt) {
+      parts.push({
+        type: "emote",
+        alt: item.emojiText || item.alt || "",
+        url: item.url || ""
+      });
+    }
+  }
+  return parts.length ? parts : [{ type: "text", text: "" }];
+}
+
+function buildKickParts(text) {
+  const value = String(text || "");
+  const parts = [];
+  const pattern = /\[emote:(\d+):([^\]]+)\]/g;
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(value))) {
+    if (match.index > cursor) {
+      pushTextPart(parts, value.slice(cursor, match.index));
+    }
+    parts.push({
+      type: "emote",
+      alt: match[2],
+      url: `https://files.kick.com/emotes/${match[1]}/fullsize`
+    });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < value.length) {
+    pushTextPart(parts, value.slice(cursor));
+  }
+  return parts.length ? parts : [{ type: "text", text: value }];
+}
+
+function slobsCall(resource, method, args = []) {
+  const request = JSON.stringify({
+    jsonrpc: "2.0",
+    id: Date.now(),
+    method,
+    params: { resource, args }
+  }) + "\n";
+
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection("\\\\.\\pipe\\slobs");
+    let buffer = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Timed out connecting to Streamlabs Desktop API"));
+    }, 2500);
+
+    socket.on("connect", () => {
+      socket.write(request);
+    });
+    socket.on("data", (data) => {
+      buffer += data.toString("utf8");
+      const line = buffer.split("\n").find((item) => item.trim());
+      if (!line) return;
+      clearTimeout(timer);
+      socket.end();
+      try {
+        const response = JSON.parse(line);
+        if (response.error) {
+          reject(new Error(response.error.message || JSON.stringify(response.error)));
+          return;
+        }
+        resolve(response.result);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on("close", () => clearTimeout(timer));
+  });
+}
+
+async function discoverObsState() {
+  const [activeScene, scenes, audioSources] = await Promise.all([
+    slobsCall("ScenesService", "activeScene"),
+    slobsCall("ScenesService", "getScenes"),
+    slobsCall("AudioService", "getSourcesForCurrentScene")
+  ]);
+  return {
+    obsConnected: true,
+    currentScene: activeScene?.name || "",
+    scenes: (scenes || [])
+      .map((scene) => ({ id: scene.id, name: scene.name }))
+      .filter((scene) => scene.id && scene.name),
+    audioInputs: (audioSources || [])
+      .map((source) => ({
+        id: source.id || source.sourceId || source.resourceId,
+        resourceId: source.resourceId,
+        name: source.name || source.sourceId || "Audio Source",
+        muted: Boolean(source.muted),
+        volumeDb: typeof source.fader?.deflection === "number" ? Math.round(source.fader.deflection * 100) : 0,
+        volumeMul: typeof source.fader?.deflection === "number" ? source.fader.deflection : 0
+      }))
+      .filter((source) => source.resourceId)
+  };
+}
+
+async function setObsScene(sceneName) {
+  const scenes = await slobsCall("ScenesService", "getScenes");
+  const scene = (scenes || []).find((item) => item.name === sceneName);
+  if (!scene?.id) throw new Error(`Scene not found: ${sceneName}`);
+  await slobsCall("ScenesService", "makeSceneActive", [scene.id]);
+}
+
+async function setObsInputMute(inputName, muted) {
+  const snapshot = await discoverObsState();
+  const source = snapshot.audioInputs.find((item) => item.name === inputName || item.id === inputName || item.resourceId === inputName);
+  if (!source?.resourceId) throw new Error(`Audio source not found: ${inputName}`);
+  await slobsCall(source.resourceId, "setMuted", [Boolean(muted)]);
+}
+
+async function setObsInputVolume(inputName, volume) {
+  const snapshot = await discoverObsState();
+  const source = snapshot.audioInputs.find((item) => item.name === inputName || item.id === inputName || item.resourceId === inputName);
+  if (!source?.resourceId) throw new Error(`Audio source not found: ${inputName}`);
+  const value = Math.max(0, Math.min(1, Number(volume) / 100));
+  await slobsCall(source.resourceId, "setDeflection", [value]);
+}
+
 function createServer() {
   const server = http.createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/message") {
-      let body = "";
-      req.on("data", (chunk) => {
-        body += chunk;
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-headers": "content-type"
       });
-      req.on("end", () => {
-        try {
-          const data = JSON.parse(body);
+      res.end();
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/message") {
+      readJsonBody(req).then((data) => {
           message({
             platform: data.platform || "relay",
             channel: data.channel || "manual",
@@ -89,10 +331,78 @@ function createServer() {
             text: String(data.text || data.message || "")
           });
           res.writeHead(204).end();
-        } catch {
+        }).catch(() => {
           res.writeHead(400).end("Expected JSON: {\"author\":\"Name\",\"text\":\"Message\"}");
-        }
-      });
+        });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/hud") {
+      readJsonBody(req).then((data) => {
+          hud(data);
+          res.writeHead(204).end();
+        }).catch(() => {
+          res.writeHead(400).end("Expected HUD JSON");
+        });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/quest-status") {
+      writeJson(res, 200, questStatus);
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/quest-status") {
+      readJsonBody(req).then((data) => {
+          questStatus = {
+            questConnected: data.connected !== false,
+            questDevice: String(data.questDevice || data.device || ""),
+            questBattery: String(data.questBattery || data.batteryLevel || ""),
+            questBatteryStatus: String(data.questBatteryStatus || data.batteryStatus || ""),
+            timestamp: Number(data.timestamp || Date.now())
+          };
+          hud(questStatus);
+          res.writeHead(204).end();
+        }).catch(() => {
+          res.writeHead(400).end("Expected Quest status JSON");
+        });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/control/obs/snapshot") {
+      discoverObsState()
+        .then((snapshot) => writeJson(res, 200, snapshot))
+        .catch((error) => writeJson(res, 503, { error: cleanError(error) }));
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/control/obs/scene") {
+      readJsonBody(req)
+        .then(async (data) => {
+          await setObsScene(String(data.sceneName || ""));
+          writeJson(res, 200, { ok: true });
+        })
+        .catch((error) => writeJson(res, 400, { error: cleanError(error) }));
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/control/obs/mute") {
+      readJsonBody(req)
+        .then(async (data) => {
+          await setObsInputMute(String(data.inputName || ""), data.muted);
+          writeJson(res, 200, { ok: true });
+        })
+        .catch((error) => writeJson(res, 400, { error: cleanError(error) }));
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/control/obs/volume") {
+      readJsonBody(req)
+        .then(async (data) => {
+          await setObsInputVolume(String(data.inputName || ""), data.volume);
+          writeJson(res, 200, { ok: true });
+        })
+        .catch((error) => writeJson(res, 400, { error: cleanError(error) }));
       return;
     }
 
@@ -105,6 +415,15 @@ function createServer() {
     clients.add(socket);
     socket.on("close", () => clients.delete(socket));
     socket.on("error", () => clients.delete(socket));
+    socket.on("message", (raw) => {
+      handleSocketMessage(socket, raw).catch((error) => {
+        socket.send(JSON.stringify({
+          type: "control-result",
+          ok: false,
+          error: cleanError(error)
+        }));
+      });
+    });
     socket.send(JSON.stringify({ type: "status", source: "Relay", state: "connected", detail: "PC relay attached" }));
   });
 
@@ -115,6 +434,39 @@ function createServer() {
     }
     console.log(`Discovery listening on UDP ${DISCOVERY_PORT}`);
   });
+}
+
+async function handleSocketMessage(socket, raw) {
+  const data = parseJson(raw.toString());
+  if (!data || data.type !== "control") return;
+
+  const requestId = data.requestId || "";
+  try {
+    if (data.action === "obs:scene") {
+      await setObsScene(String(data.sceneName || ""));
+      socket.send(JSON.stringify({ type: "control-result", requestId, ok: true }));
+      return;
+    }
+    if (data.action === "obs:mute") {
+      await setObsInputMute(String(data.inputName || ""), data.muted);
+      socket.send(JSON.stringify({ type: "control-result", requestId, ok: true }));
+      return;
+    }
+    if (data.action === "obs:volume") {
+      await setObsInputVolume(String(data.inputName || ""), data.volume);
+      socket.send(JSON.stringify({ type: "control-result", requestId, ok: true }));
+      return;
+    }
+    if (data.action === "obs:snapshot") {
+      const snapshot = await discoverObsState();
+      socket.send(JSON.stringify({ type: "control-result", requestId, ok: true, snapshot }));
+      return;
+    }
+
+    socket.send(JSON.stringify({ type: "control-result", requestId, ok: false, error: `Unknown control action: ${data.action}` }));
+  } catch (error) {
+    socket.send(JSON.stringify({ type: "control-result", requestId, ok: false, error: cleanError(error) }));
+  }
 }
 
 function createDiscoveryServer() {
@@ -172,11 +524,13 @@ function createTwitchConnector(channels) {
 
       client.on("message", (channel, userstate, text, self) => {
         if (self) return;
+        const parts = buildTwitchParts(text, userstate.emotes);
         message({
           platform: "twitch",
           channel: channel.replace(/^#/, ""),
           author: userstate["display-name"] || userstate.username || "viewer",
           text,
+          parts,
           color: userstate.color || "#a970ff",
           badges: Object.keys(userstate.badges || {})
         });
@@ -225,11 +579,13 @@ function createYouTubeConnector(source) {
       liveChat.on("chat", (item) => {
         const text = flattenYouTubeMessage(item.message);
         if (!text) return;
+        const parts = buildYouTubeParts(item.message);
         message({
           platform: "youtube",
           channel: target.channelId || target.liveId || source,
           author: item.author?.name || "viewer",
           text,
+          parts,
           badges: getYouTubeBadges(item)
         });
       });
@@ -351,11 +707,13 @@ function createKickConnector(slug) {
         const data = parseJson(event.data);
         const body = parseKickMessage(data);
         if (!body) return;
+        const parts = buildKickParts(body.text);
         message({
           platform: "kick",
           channel: slug,
           author: body.author,
           text: body.text,
+          parts,
           color: "#53fc18",
           badges: body.badges
         });

@@ -11,22 +11,80 @@
     <header class="topbar">
       <div>
         <h1>Stream Chat</h1>
-        <p id="status">Enter the relay URL printed by your PC</p>
+        <p id="status">Searching for your PC relay</p>
       </div>
       <div class="actions">
+        <button id="obsToggle" type="button">OBS</button>
+        <button id="settingsToggle" type="button">Settings</button>
         <button id="compactToggle" type="button">Compact</button>
         <button id="clearButton" type="button">Clear</button>
       </div>
     </header>
 
+    <section id="settingsPanel" class="settings-panel" hidden>
+      <div class="settings-header">
+        <h2>Connection Mode</h2>
+        <button id="closeSettings" type="button">Close</button>
+      </div>
+      <label class="field">
+        <span>Mode</span>
+        <select id="modeSelect">
+          <option value="companion">Companion App + OBS</option>
+          <option value="streamchat">Stream Chat Only</option>
+        </select>
+      </label>
+      <div id="relayUrlField" class="field">
+        <span>Relay URL</span>
+        <input id="socketUrl" name="socketUrl" type="password" inputmode="url" placeholder="relay address hidden">
+      </div>
+      <div id="sourcesFieldset" class="settings-grid">
+        <label class="field">
+          <span>Twitch channels</span>
+          <textarea id="twitchChannels" spellcheck="false" placeholder="channel-name"></textarea>
+        </label>
+        <label class="field">
+          <span>YouTube sources</span>
+          <textarea id="youtubeSources" spellcheck="false" placeholder="@channel, channel ID, live URL, or live video ID"></textarea>
+        </label>
+        <label class="field">
+          <span>Kick channels</span>
+          <textarea id="kickChannels" spellcheck="false" placeholder="channel-name"></textarea>
+        </label>
+      </div>
+      <div class="settings-actions">
+        <button id="saveSettings" type="button">Save & Apply</button>
+      </div>
+    </section>
+
+    <section id="hud" class="hud" aria-label="Stream HUD">
+      <div class="hud-item"><span>OBS</span><strong id="hudObs">Offline</strong></div>
+      <div class="hud-item"><span>Scene</span><strong id="hudScene">-</strong></div>
+      <div class="hud-item"><span>Live</span><strong id="hudUptime">00:00:00</strong></div>
+      <div class="hud-item"><span>Quest</span><strong id="hudQuest">-</strong></div>
+    </section>
+
     <section id="sources" class="sources" aria-label="Source status"></section>
-    <section id="messages" class="messages" aria-live="polite"></section>
+    <section id="obsControls" class="obs-controls" aria-label="OBS controls">
+      <div class="control-header">
+        <h2>OBS Control</h2>
+        <div class="control-actions">
+          <button id="refreshObsButton" type="button">Refresh</button>
+          <button id="closeObsControls" type="button">Close</button>
+        </div>
+      </div>
+      <div class="control-block">
+        <div class="control-label">Scenes</div>
+        <div id="sceneControls" class="scene-controls"></div>
+      </div>
+      <div class="control-block">
+        <div class="control-label">Audio</div>
+        <div id="audioControls" class="audio-controls"></div>
+      </div>
+    </section>
+    <section id="messages" class="messages" aria-live="polite" tabindex="0"></section>
 
     <form id="settingsForm" class="settings">
-      <label for="socketUrl">Relay</label>
-      <input id="socketUrl" name="socketUrl" type="password" inputmode="url" placeholder="relay address hidden">
-      <button id="connectButton" type="submit">Connect</button>
-      <button id="mockButton" type="button">Mock</button>
+      <button id="connectButton" type="submit">Reconnect</button>
     </form>
   </main>
 

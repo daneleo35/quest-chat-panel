@@ -19,6 +19,13 @@
       </div>
     </header>
 
+    <nav class="tabs" aria-label="Control tabs">
+      <button class="tab active" type="button" data-tab="overview">Overview</button>
+      <button class="tab" type="button" data-tab="chat">Chat Sources</button>
+      <button class="tab" type="button" data-tab="obs">Streamlabs</button>
+    </nav>
+
+    <section class="tab-panel active" id="tab-overview">
     <section class="status-grid">
       <article>
         <span class="label">Relay</span>
@@ -76,30 +83,64 @@
       <div><span>Log</span><code id="logPath"></code></div>
     </section>
 
-    <section class="settings-panel">
-      <div class="settings-title">Chat Sources</div>
-      <div class="settings-grid">
-        <label>
-          <span>Twitch channels</span>
-          <textarea id="twitchChannels" spellcheck="false" placeholder="channel-name"></textarea>
-        </label>
-        <label>
-          <span>YouTube sources</span>
-          <textarea id="youtubeSources" spellcheck="false" placeholder="@channel, channel ID, live URL, or live video ID"></textarea>
-        </label>
-        <label>
-          <span>Kick channels</span>
-          <textarea id="kickChannels" spellcheck="false" placeholder="channel-name"></textarea>
-        </label>
-      </div>
-      <div class="settings-actions">
-        <button id="saveSources">Save Sources</button>
-      </div>
-    </section>
-
     <section class="log-panel">
       <div class="log-title">Live Log</div>
       <pre id="log"></pre>
+    </section>
+    </section>
+
+    <section class="tab-panel" id="tab-chat">
+      <section class="settings-panel">
+        <div class="settings-title">Chat Sources</div>
+        <div class="settings-grid">
+          <label>
+            <span>Twitch channels</span>
+            <textarea id="twitchChannels" spellcheck="false" placeholder="channel-name"></textarea>
+          </label>
+          <label>
+            <span>YouTube sources</span>
+            <textarea id="youtubeSources" spellcheck="false" placeholder="@channel, channel ID, live URL, or live video ID"></textarea>
+          </label>
+          <label>
+            <span>Kick channels</span>
+            <textarea id="kickChannels" spellcheck="false" placeholder="channel-name"></textarea>
+          </label>
+        </div>
+        <div class="settings-actions">
+          <button id="saveSources">Save Sources</button>
+        </div>
+      </section>
+    </section>
+
+    <section class="tab-panel" id="tab-obs">
+      <section class="settings-panel">
+        <div class="settings-title">Streamlabs Control</div>
+        <div class="obs-status">
+          <div><span>Streamlabs</span><strong id="obsStatus">Disabled</strong></div>
+          <div><span>Scene</span><strong id="obsScene">-</strong></div>
+          <div><span>Quest</span><strong id="questHudStatus">-</strong></div>
+        </div>
+        <div class="obs-grid">
+          <label class="toggle">
+            <input id="obsEnabled" type="checkbox">
+            <span>Enable Streamlabs HUD connection</span>
+          </label>
+        </div>
+        <div class="settings-actions">
+          <button id="refreshObs" type="button">Refresh Streamlabs</button>
+          <button id="saveObs">Save Streamlabs</button>
+        </div>
+      </section>
+
+      <section class="settings-panel">
+        <div class="settings-title">Streamlabs Scenes</div>
+        <div id="obsSceneList" class="scene-list"></div>
+      </section>
+
+      <section class="settings-panel">
+        <div class="settings-title">Streamlabs Audio</div>
+        <div id="obsAudioList" class="audio-list"></div>
+      </section>
     </section>
   </main>
 

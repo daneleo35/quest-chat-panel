@@ -1,6 +1,6 @@
 {
   "name": "quest-chat-panel-relay",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "private": true,
   "description": "PC relay for a sideloaded Meta Quest chat panel.",
   "main": "scripts/control-main.js",

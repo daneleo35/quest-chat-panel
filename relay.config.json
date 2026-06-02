@@ -2,5 +2,8 @@
   "port": 8787,
   "twitchChannels": [],
   "youtubeSources": [],
-  "kickChannels": []
+  "kickChannels": [],
+  "obs": {
+    "enabled": false
+  }
 }
