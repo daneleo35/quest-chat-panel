@@ -90,21 +90,6 @@ release\Quest Chat Panel Control-win32-x64\Quest Chat Panel Control.exe
 
 The `release` folder is ignored by Git because it contains the bundled Electron runtime.
 
-## Build The Windows Installer
-
-```powershell
-cd quest-chat-panel
-.\gradlew.bat assembleDebug
-npm run package:installer
-```
-
-The installer is written to:
-
-```text
-installer\Quest-Chat-Panel-Control-Setup-<version>.exe
-```
-
-The installer includes the Quest APK as a bundled resource for auto-install.
 
 ## The plain relay via command prompt/powershell
 
