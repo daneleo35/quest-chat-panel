@@ -9,7 +9,7 @@
     "relay": "node scripts/relay-server.js",
     "bump-version": "node scripts/bump-version.js",
     "build:apk": "gradle assembleDebug",
-    "package:control": "electron-packager . \"Quest Chat Panel Control\" --platform=win32 --arch=x64 --out=release --overwrite --no-asar --ignore=\"^/dist($|/)\" --ignore=\"^/release($|/)\" --ignore=\"^/installer($|/)\" --ignore=\"^/logs($|/)\" --ignore=\"^/updates($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/\\.gradle($|/)\" --ignore=\"^/build($|/)\"",
+    "package:control": "electron-packager . \"Quest Chat Panel Control\" --platform=win32 --arch=x64 --icon=\"scripts/control-renderer/app-icon.ico\" --out=release --overwrite --no-asar --ignore=\"^/dist($|/)\" --ignore=\"^/release($|/)\" --ignore=\"^/installer($|/)\" --ignore=\"^/logs($|/)\" --ignore=\"^/updates($|/)\" --ignore=\"^/\\.git($|/)\" --ignore=\"^/\\.gradle($|/)\" --ignore=\"^/build($|/)\"",
     "package:installer": "electron-builder --win nsis --x64 --publish never"
   },
   "build": {
@@ -32,6 +32,7 @@
       }
     ],
     "win": {
+      "icon": "scripts/control-renderer/app-icon.ico",
       "signAndEditExecutable": false,
       "target": [
         {

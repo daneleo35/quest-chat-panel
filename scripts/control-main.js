@@ -13,7 +13,8 @@ const RELAY_CONFIG_PATH = path.join(ROOT, "relay.config.json");
 const LOG_DIR = path.join(ROOT, "logs");
 const LOG_PATH = path.join(LOG_DIR, `quest-chat-panel-${timestampForFile()}.log`);
 const UPDATE_DIR = path.join(ROOT, "updates");
-const APP_ICON_PATH = path.join(ROOT, "scripts", "control-renderer", "app-icon.png");
+const APP_ICON_PNG_PATH = path.join(ROOT, "scripts", "control-renderer", "app-icon.png");
+const APP_ICON_ICO_PATH = path.join(ROOT, "scripts", "control-renderer", "app-icon.ico");
 const POLL_MS = 3500;
 const UPDATE_REPO = "daneleo35/quest-chat-panel";
 const APP_ASSET_NAME = "Quest-Chat-Panel-Control-win32-x64.zip";
@@ -94,7 +95,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 520,
     title: "Quest Chat Panel Control",
-    icon: APP_ICON_PATH,
+    icon: APP_ICON_ICO_PATH,
     backgroundColor: "#0b0f14",
     webPreferences: {
       preload: path.join(__dirname, "control-preload.js"),
@@ -118,7 +119,7 @@ function createWindow() {
 function createTrayIcon() {
   if (tray) return tray;
 
-  const icon = nativeImage.createFromPath(APP_ICON_PATH).resize({ width: 32, height: 32 });
+  const icon = nativeImage.createFromPath(APP_ICON_PNG_PATH).resize({ width: 32, height: 32 });
   icon.setTemplateImage(false);
 
   tray = new Tray(icon);
