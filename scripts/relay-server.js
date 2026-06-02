@@ -20,6 +20,8 @@ const DISCOVERY_REQUEST = "QUEST_CHAT_DISCOVER";
 const config = normalizeConfig(readConfig());
 const clients = new Set();
 const connectors = [];
+const latestStatuses = new Map();
+let latestHud = null;
 let questStatus = {
   questConnected: false,
   questDevice: "",
@@ -94,6 +96,7 @@ function readJsonBody(req) {
 
 function status(source, state, detail) {
   const event = { type: "status", source, state, detail };
+  latestStatuses.set(source, event);
   console.log(`[${source}] ${state}${detail ? ` - ${detail}` : ""}`);
   broadcast(event);
 }
@@ -111,11 +114,12 @@ function message(payload) {
 }
 
 function hud(payload) {
-  broadcast({
+  latestHud = {
     type: "hud",
     timestamp: new Date().toISOString(),
     ...payload
-  });
+  };
+  broadcast(latestHud);
 }
 
 function flattenMessageParts(parts) {
@@ -144,11 +148,14 @@ function buildTwitchParts(text, emotes) {
   const ranges = [];
   for (const [emoteId, matches] of Object.entries(emotes)) {
     for (const range of matches || []) {
-      if (!Array.isArray(range) || range.length < 2) continue;
+      const parsedRange = Array.isArray(range)
+        ? range
+        : String(range).split("-").map((item) => Number(item));
+      if (!Array.isArray(parsedRange) || parsedRange.length < 2 || parsedRange.some((item) => Number.isNaN(item))) continue;
       ranges.push({
         id: emoteId,
-        start: Number(range[0]),
-        end: Number(range[1])
+        start: Number(parsedRange[0]),
+        end: Number(parsedRange[1])
       });
     }
   }
@@ -185,19 +192,51 @@ function buildYouTubeParts(messageItems) {
       pushTextPart(parts, item.text);
       continue;
     }
-    if (item?.url || item?.emojiText || item?.alt) {
+    const thumbnail = item?.thumbnails?.[item.thumbnails.length - 1] || item?.emoji?.image?.thumbnails?.slice(-1)[0];
+    if (item?.url || thumbnail?.url || item?.emojiText || item?.alt) {
       parts.push({
         type: "emote",
         alt: item.emojiText || item.alt || "",
-        url: item.url || ""
+        url: item.url || thumbnail?.url || ""
       });
     }
   }
   return parts.length ? parts : [{ type: "text", text: "" }];
 }
 
-function buildKickParts(text) {
+function buildKickParts(text, emotes = []) {
   const value = String(text || "");
+  const meta = Array.isArray(emotes)
+    ? emotes
+        .map((item) => ({
+          id: item?.id || item?.emote_id || item?.emoteId || "",
+          alt: item?.name || item?.slug || item?.shortcode || item?.text || "",
+          start: Number(item?.start ?? item?.begin ?? item?.position),
+          end: Number(item?.end ?? item?.stop ?? item?.positionEnd)
+        }))
+        .filter((item) => item.id && Number.isFinite(item.start) && Number.isFinite(item.end) && item.end >= item.start)
+        .sort((left, right) => left.start - right.start)
+    : [];
+  if (meta.length) {
+    const parts = [];
+    let cursor = 0;
+    for (const emote of meta) {
+      if (emote.start > cursor) {
+        pushTextPart(parts, value.slice(cursor, emote.start));
+      }
+      const alt = emote.alt || value.slice(emote.start, emote.end + 1);
+      parts.push({
+        type: "emote",
+        alt,
+        url: `https://files.kick.com/emotes/${emote.id}/fullsize`
+      });
+      cursor = emote.end + 1;
+    }
+    if (cursor < value.length) {
+      pushTextPart(parts, value.slice(cursor));
+    }
+    return parts.length ? parts : [{ type: "text", text: value }];
+  }
   const parts = [];
   const pattern = /\[emote:(\d+):([^\]]+)\]/g;
   let cursor = 0;
@@ -425,6 +464,12 @@ function createServer() {
       });
     });
     socket.send(JSON.stringify({ type: "status", source: "Relay", state: "connected", detail: "PC relay attached" }));
+    if (latestHud) {
+      socket.send(JSON.stringify(latestHud));
+    }
+    for (const event of latestStatuses.values()) {
+      socket.send(JSON.stringify(event));
+    }
   });
 
   server.listen(config.port, "0.0.0.0", () => {
@@ -707,7 +752,7 @@ function createKickConnector(slug) {
         const data = parseJson(event.data);
         const body = parseKickMessage(data);
         if (!body) return;
-        const parts = buildKickParts(body.text);
+        const parts = buildKickParts(body.text, body.emotes);
         message({
           platform: "kick",
           channel: slug,
@@ -754,7 +799,8 @@ function parseKickMessage(data) {
   if (!text) return undefined;
   return {
     author: sender.username || sender.slug || sender.name || "viewer",
-    text: String(text).replace(/\[emote:(\d+):([^\]]+)\]/g, "$2"),
+    text: String(text),
+    emotes: data.emotes || data.content_emotes || data.message_emotes || [],
     badges: (sender.identity?.badges || sender.badges || []).map((badge) => badge.text || badge.name || badge.type).filter(Boolean)
   };
 }

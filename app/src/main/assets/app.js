@@ -40,11 +40,14 @@ const displayedMessages = new Set();
 let settings = loadSettings();
 let hudState = { scenes: [], audioInputs: [] };
 let socket;
+let socketUrl = "";
 let reconnectTimer = 0;
 let manualDisconnect = false;
 let obsPanelOpen = false;
 let controlCounter = 0;
 let questHeartbeatTimer = 0;
+let gamepadFrame = 0;
+let gamepadVelocity = 0;
 const pendingControls = new Map();
 
 function loadSettings() {
@@ -205,6 +208,13 @@ function renderMessageBody(container, parts, fallbackText) {
       image.alt = part.alt || "";
       image.loading = "lazy";
       image.addEventListener("load", () => scrollMessagesToBottom());
+      image.addEventListener("error", () => {
+        const fallback = document.createElement("span");
+        fallback.className = "emote-fallback";
+        fallback.textContent = part.alt || "";
+        image.replaceWith(fallback);
+        scrollMessagesToBottom();
+      }, { once: true });
       container.append(image);
       continue;
     }
@@ -224,7 +234,41 @@ function scrollMessagesToBottom(force = true) {
   if (!force && !isNearBottom()) return;
   requestAnimationFrame(() => {
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    window.setTimeout(() => {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }, 50);
   });
+}
+
+function scrollMessagesBy(delta) {
+  if (!delta) return;
+  messagesEl.scrollTop += delta;
+}
+
+function startGamepadLoop() {
+  if (gamepadFrame) return;
+  const tick = () => {
+    gamepadFrame = window.requestAnimationFrame(tick);
+    if (!settingsPanel.hidden || !obsControls.hidden) return;
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let axisValue = 0;
+    for (const pad of pads || []) {
+      if (!pad || !pad.connected) continue;
+      const candidates = [pad.axes?.[3], pad.axes?.[1], pad.axes?.[2]];
+      const axis = candidates.find((value) => typeof value === "number" && Math.abs(value) > 0.14);
+      if (typeof axis === "number") {
+        axisValue = axis;
+        break;
+      }
+    }
+    if (Math.abs(axisValue) < 0.14) {
+      gamepadVelocity = 0;
+      return;
+    }
+    gamepadVelocity = axisValue * 26;
+    scrollMessagesBy(gamepadVelocity);
+  };
+  gamepadFrame = window.requestAnimationFrame(tick);
 }
 
 function addMessage({ id, platform = "relay", author = "Relay", user, text = "", parts, timestamp, time }) {
@@ -406,6 +450,7 @@ function disconnectRelay() {
     socket.close();
   }
   socket = null;
+  socketUrl = "";
 }
 
 function scheduleReconnect() {
@@ -584,7 +629,6 @@ function handleRelayEvent(event) {
       return;
     }
     updateSource(event.source, event.state, event.detail || event.state);
-    setStatus(`${event.source}: ${event.detail || event.state}`);
     return;
   }
 
@@ -601,6 +645,9 @@ function handleRelayEvent(event) {
 
 function connectRelay(url, options = {}) {
   if (!url) return;
+  if (socket && socketUrl === url && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
   disconnectRelay();
   settings.relayUrl = url;
   persistSettings();
@@ -610,6 +657,7 @@ function connectRelay(url, options = {}) {
   manualDisconnect = false;
 
   socket = new WebSocket(url);
+  socketUrl = url;
   socket.addEventListener("open", () => {
     setStatus("Connected to relay");
     connectButton.disabled = false;
@@ -638,6 +686,8 @@ function connectRelay(url, options = {}) {
     }
     setStatus("Disconnected, retrying");
     connectButton.disabled = false;
+    socket = null;
+    socketUrl = "";
     scheduleReconnect();
   });
   socket.addEventListener("error", () => {
@@ -695,8 +745,11 @@ function buildTwitchParts(text, emotes) {
   const ranges = [];
   for (const [id, matches] of Object.entries(emotes)) {
     for (const match of matches || []) {
-      if (!Array.isArray(match) || match.length < 2) continue;
-      ranges.push({ id, start: Number(match[0]), end: Number(match[1]) });
+      const parsedMatch = Array.isArray(match)
+        ? match
+        : String(match).split("-").map((item) => Number(item));
+      if (!Array.isArray(parsedMatch) || parsedMatch.length < 2 || parsedMatch.some((item) => Number.isNaN(item))) continue;
+      ranges.push({ id, start: Number(parsedMatch[0]), end: Number(parsedMatch[1]) });
     }
   }
   ranges.sort((left, right) => left.start - right.start);
@@ -828,7 +881,7 @@ function parseYouTubeMessages(runs) {
     if ("text" in run) {
       return { type: "text", text: run.text };
     }
-    const thumbnail = run?.emoji?.image?.thumbnails?.[0];
+    const thumbnail = run?.emoji?.image?.thumbnails?.slice(-1)[0];
     const shortcut = run?.emoji?.shortcuts?.[0] || "";
     return {
       type: "emote",
@@ -1140,7 +1193,6 @@ function startCompanionMode() {
   renderSources();
   stopDirectConnectors();
   if (settings.relayUrl) {
-    startQuestHeartbeat();
     connectRelay(settings.relayUrl, { isRetry: true });
   } else {
     setStatus("Searching for relay on your LAN");
@@ -1162,6 +1214,7 @@ function applyMode() {
 
 window.autoConnectRelay = (url) => {
   if (!url || settings.mode !== MODE_COMPANION) return;
+  if (settings.relayUrl === url && socket && socketUrl === url && socket.readyState === WebSocket.OPEN) return;
   settings.relayUrl = url;
   persistSettings();
   syncSettingsForm();
@@ -1219,6 +1272,7 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
   }
 });
+window.addEventListener("gamepadconnected", () => startGamepadLoop());
 modeSelect.addEventListener("change", () => {
   settings.mode = modeSelect.value === MODE_STREAMCHAT ? MODE_STREAMCHAT : MODE_COMPANION;
   syncSettingsForm();
@@ -1241,3 +1295,4 @@ setModeClass();
 syncSettingsForm();
 applyMode();
 messagesEl.focus();
+startGamepadLoop();

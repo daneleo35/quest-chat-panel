@@ -450,6 +450,10 @@ textarea:focus {
   vertical-align: middle;
 }
 
+.emote-fallback {
+  white-space: pre-wrap;
+}
+
 .settings {
   display: grid;
   grid-template-columns: auto auto auto;
