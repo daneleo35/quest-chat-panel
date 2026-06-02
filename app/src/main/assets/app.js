@@ -234,16 +234,26 @@ function scrollMessagesToBottom(force = true) {
   if (!force && !isNearBottom()) return;
   requestAnimationFrame(() => {
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    messagesEl.lastElementChild?.scrollIntoView({ block: "end" });
     window.setTimeout(() => {
       messagesEl.scrollTop = messagesEl.scrollHeight;
+      messagesEl.lastElementChild?.scrollIntoView({ block: "end" });
     }, 50);
+    window.setTimeout(() => {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      messagesEl.lastElementChild?.scrollIntoView({ block: "end" });
+    }, 140);
   });
 }
 
 function scrollMessagesBy(delta) {
   if (!delta) return;
-  messagesEl.scrollTop += delta;
+  messagesEl.scrollBy({ top: delta, behavior: "auto" });
 }
+
+window.questNativeScrollBy = (delta) => {
+  scrollMessagesBy(Number(delta) || 0);
+};
 
 function startGamepadLoop() {
   if (gamepadFrame) return;
@@ -280,35 +290,29 @@ function addMessage({ id, platform = "relay", author = "Relay", user, text = "",
 
   const item = document.createElement("article");
   item.className = "message";
+  item.title = new Date(timestamp || time || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const avatar = document.createElement("div");
-  avatar.className = "avatar";
-  avatar.style.background = colorFor(displayName);
-  avatar.textContent = displayName.slice(0, 1).toUpperCase();
-
-  const body = document.createElement("div");
-  const meta = document.createElement("div");
-  meta.className = "meta";
+  const line = document.createElement("div");
+  line.className = "message-line";
 
   const badge = document.createElement("div");
   badge.className = `platform ${platform}`;
   badge.textContent = platform;
 
-  const name = document.createElement("div");
+  const name = document.createElement("span");
   name.className = "name";
   name.textContent = displayName;
 
-  const stamp = document.createElement("time");
-  stamp.className = "time";
-  stamp.textContent = new Date(timestamp || time || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const separator = document.createElement("span");
+  separator.className = "separator";
+  separator.textContent = ":";
 
-  const message = document.createElement("div");
-  message.className = "text";
+  const message = document.createElement("span");
+  message.className = "text inline";
   renderMessageBody(message, parts, plainText);
 
-  meta.append(badge, name, stamp);
-  body.append(meta, message);
-  item.append(avatar, body);
+  line.append(badge, name, separator, message);
+  item.append(line);
   messagesEl.append(item);
 
   while (messagesEl.children.length > 140) messagesEl.firstElementChild.remove();

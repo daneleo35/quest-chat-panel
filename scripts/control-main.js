@@ -59,6 +59,7 @@ let questNetworkState = {
   id: "",
   batteryLevel: "",
   batteryStatus: "",
+  apkVersion: "",
   lastSeenAt: 0
 };
 let updateInfo = {
@@ -374,28 +375,35 @@ foreach ($listenPort in @(${port}, ${discoveryPort})) {
       ForEach-Object { if ($_.OwningProcess -ne ${process.pid}) { $targets[$_.OwningProcess] = $true } }
   } catch {}
 }
-$killed = @()
-foreach ($pidValue in $targets.Keys) {
-  try {
-    Stop-Process -Id ([int]$pidValue) -Force -ErrorAction Stop
-    $killed += [int]$pidValue
-  } catch {}
-}
-$killed | ConvertTo-Json -Compress
+$targets.Keys | ConvertTo-Json -Compress
 `;
   const result = await run("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
   if (result.code !== 0) {
-    log(`Could not terminate existing relay instances: ${result.stderr || result.stdout}`, "relay");
+    log(`Could not inspect existing relay instances: ${result.stderr || result.stdout}`, "relay");
     return [];
   }
   const output = String(result.stdout || "").trim();
   if (!output) return [];
+  let targets;
   try {
     const parsed = JSON.parse(output);
-    return Array.isArray(parsed) ? parsed : [parsed].filter(Boolean);
+    targets = (Array.isArray(parsed) ? parsed : [parsed])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0 && value !== process.pid);
   } catch {
     return [];
   }
+  const killed = [];
+  for (const pidValue of targets) {
+    const taskkill = await run("taskkill", ["/PID", String(pidValue), "/F"]);
+    const combined = `${taskkill.stdout}\n${taskkill.stderr}`;
+    if (taskkill.code === 0 || /SUCCESS:/i.test(combined)) {
+      killed.push(pidValue);
+      continue;
+    }
+    log(`Could not terminate PID ${pidValue}: ${combined.trim() || `exit ${taskkill.code}`}`, "relay");
+  }
+  return killed;
 }
 
 async function startRelay(attempt = 0) {
@@ -1071,14 +1079,23 @@ async function readQuestNetworkStatus() {
               id: String(data.questDevice || ""),
               batteryLevel: String(data.questBattery || ""),
               batteryStatus: String(data.questBatteryStatus || ""),
+              apkVersion: String(data.questApkVersion || ""),
               lastSeenAt: timestamp
             };
+            if (questNetworkState.apkVersion) {
+              questApkVersion = questNetworkState.apkVersion;
+              questApkVersionChecked = true;
+              controlState.lastInstalledApkVersion = questNetworkState.apkVersion;
+              saveControlState();
+              refreshCurrentApkVersion();
+            }
           } else if (Date.now() - questNetworkState.lastSeenAt >= QUEST_NETWORK_STALE_MS) {
             questNetworkState = {
               connected: false,
               id: "",
               batteryLevel: "",
               batteryStatus: "",
+              apkVersion: "",
               lastSeenAt: 0
             };
           }
@@ -1089,6 +1106,7 @@ async function readQuestNetworkStatus() {
               id: "",
               batteryLevel: "",
               batteryStatus: "",
+              apkVersion: "",
               lastSeenAt: 0
             };
           }
@@ -1103,6 +1121,7 @@ async function readQuestNetworkStatus() {
           id: "",
           batteryLevel: "",
           batteryStatus: "",
+          apkVersion: "",
           lastSeenAt: 0
         };
       }

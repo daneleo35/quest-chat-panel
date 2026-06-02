@@ -27,6 +27,7 @@ let questStatus = {
   questDevice: "",
   questBattery: "",
   questBatteryStatus: "",
+  questApkVersion: "",
   timestamp: 0
 };
 
@@ -398,6 +399,7 @@ function createServer() {
             questDevice: String(data.questDevice || data.device || ""),
             questBattery: String(data.questBattery || data.batteryLevel || ""),
             questBatteryStatus: String(data.questBatteryStatus || data.batteryStatus || ""),
+            questApkVersion: String(data.questApkVersion || ""),
             timestamp: Number(data.timestamp || Date.now())
           };
           hud(questStatus);
