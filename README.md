@@ -45,7 +45,7 @@ The easiest PC flow is the desktop control app:
 Double-click:
 
 ```text
-Quest Chat Panel Control.vbs
+Quest Chat Panel Control.exe
 ```
 
 Or run:
