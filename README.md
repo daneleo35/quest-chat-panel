@@ -75,15 +75,6 @@ The control app checks GitHub Releases for updates. The update cards show the cu
 - Hides relay and Streamlabs controls.
 - Useful when you do not want to run the Windows companion.
 
-## Bump Versions
-
-```powershell
-cd quest-chat-panel
-npm run bump-version -- 2.0.0
-```
-
-This updates the Windows app version, `package-lock.json`, and the Quest APK `versionCode` / `versionName` together.
-
 ## Build The Windows EXE
 
 ```powershell
@@ -115,7 +106,7 @@ installer\Quest-Chat-Panel-Control-Setup-<version>.exe
 
 The installer includes the Quest APK as a bundled resource for auto-install.
 
-The plain relay is still available:
+## The plain relay via command prompt/powershell
 
 Install the relay dependencies once:
 
